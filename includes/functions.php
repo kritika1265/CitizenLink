@@ -1,9 +1,14 @@
 <?php
 // includes/functions.php
+// Prevent direct access
+if (!defined('ABSPATH')) {
+    exit('Direct access not allowed');
+}
 
-/**
- * Sanitize input data
- */
+// ============================================================================
+// INPUT VALIDATION & SANITIZATION FUNCTIONS
+// ============================================================================
+
 function sanitizeInput($data) {
     $data = trim($data);
     $data = stripslashes($data);
@@ -11,30 +16,21 @@ function sanitizeInput($data) {
     return $data;
 }
 
-/**
- * Validate email
- */
 function validateEmail($email) {
     return filter_var($email, FILTER_VALIDATE_EMAIL);
 }
 
-/**
- * Validate phone number (Indian format)
- */
 function validatePhone($phone) {
     return preg_match('/^[6-9]\d{9}$/', $phone);
 }
-
-/**
- * Validate Aadhaar number
- */
 function validateAadhaar($aadhaar) {
     return preg_match('/^\d{12}$/', $aadhaar);
 }
 
-/**
- * Generate CSRF token
- */
+// ============================================================================
+// SECURITY FUNCTIONS
+// ============================================================================
+
 function generateCSRFToken() {
     if (!isset($_SESSION['csrf_token'])) {
         $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
@@ -42,223 +38,123 @@ function generateCSRFToken() {
     return $_SESSION['csrf_token'];
 }
 
-/**
- * Verify CSRF token
- */
 function verifyCSRFToken($token) {
     return isset($_SESSION['csrf_token']) && hash_equals($_SESSION['csrf_token'], $token);
 }
 
-/**
- * Hash password
- */
 function hashPassword($password) {
     return password_hash($password, PASSWORD_DEFAULT);
 }
 
-/**
- * Verify password
- */
 function verifyPassword($password, $hash) {
     return password_verify($password, $hash);
 }
 
-/**
- * Generate application reference number
- */
-function generateReferenceNumber($serviceType) {
-    $prefix = strtoupper(substr($serviceType, 0, 3));
-    $timestamp = date('YmdHis');
-    $random = sprintf('%04d', mt_rand(1000, 9999));
-    return $prefix . $timestamp . $random;
+function isLoggedIn() {
+    return isset($_SESSION['user_id']) && !empty($_SESSION['user_id']);
 }
 
-/**
- * Log activity
- */
-function logActivity($userId, $action, $details = '') {
+function requireLogin() {
+    if (!isLoggedIn()) {
+        header('Location: /pages/login.php');
+        exit();
+    }
+}
+
+function getUserData($user_id) {
     global $pdo;
-    
-    try {
-        $stmt = $pdo->prepare("
-            INSERT INTO activity_logs (user_id, action, details, ip_address, created_at) 
-            VALUES (?, ?, ?, ?, NOW())
-        ");
-        $stmt->execute([
-            $userId,
-            $action, 
-            $details,
-            $_SERVER['REMOTE_ADDR'] ?? 'unknown'
-        ]);
-    } catch (PDOException $e) {
-        error_log("Failed to log activity: " . $e->getMessage());
-    }
+    $stmt = $pdo->prepare("SELECT * FROM users WHERE id = ?");
+    $stmt->execute([$user_id]);
+    return $stmt->fetch();
 }
 
-/**
- * Send email notification
- */
-function sendEmail($to, $subject, $message, $headers = '') {
-    $defaultHeaders = "From: " . SITE_EMAIL . "\r\n";
-    $defaultHeaders .= "Reply-To: " . SITE_EMAIL . "\r\n";
-    $defaultHeaders .= "Content-Type: text/html; charset=UTF-8\r\n";
-    
-    $finalHeaders = $defaultHeaders . $headers;
-    
-    return mail($to, $subject, $message, $finalHeaders);
-}
-
-/**
- * Format currency
- */
-function formatCurrency($amount) {
-    return '₹' . number_format($amount, 2);
-}
-
-/**
- * Format date
- */
-function formatDate($date, $format = 'd M Y') {
-    return date($format, strtotime($date));
-}
-
-/**
- * Get user details
- */
-function getUserDetails($userId) {
+function updateUserProfile($user_id, $data) {
     global $pdo;
-    
-    try {
-        $stmt = $pdo->prepare("SELECT * FROM users WHERE id = ?");
-        $stmt->execute([$userId]);
-        return $stmt->fetch();
-    } catch (PDOException $e) {
-        error_log("Failed to get user details: " . $e->getMessage());
-        return false;
-    }
+    $stmt = $pdo->prepare("UPDATE users SET first_name = ?, last_name = ?, email = ?, phone = ? WHERE id = ?");
+    return $stmt->execute([
+        $data['first_name'],
+        $data['last_name'],
+        $data['email'],
+        $data['phone'],
+        $user_id
+    ]);
 }
 
-/**
- * Get application status badge HTML
- */
-function getStatusBadge($status) {
-    $badges = [
-        STATUS_PENDING => '<span class="badge badge-warning">Pending</span>',
-        STATUS_PROCESSING => '<span class="badge badge-info">Processing</span>',
-        STATUS_APPROVED => '<span class="badge badge-success">Approved</span>',
-        STATUS_REJECTED => '<span class="badge badge-danger">Rejected</span>',
-        STATUS_COMPLETED => '<span class="badge badge-success">Completed</span>'
+function changeUserPassword($user_id, $data) {
+    global $pdo;
+    $hashed = hashPassword($data['new_password']);
+    $stmt = $pdo->prepare("UPDATE users SET password = ? WHERE id = ?");
+    return $stmt->execute([$hashed, $user_id]);
+}
+
+function uploadUserAvatar($user_id, $file) {
+    $upload = uploadFile($file);
+    if ($upload['success']) {
+        global $pdo;
+        $stmt = $pdo->prepare("UPDATE users SET avatar = ? WHERE id = ?");
+        $stmt->execute([$upload['filename'], $user_id]);
+        return true;
+    }
+    return false;
+}
+
+function getUserLoginHistory($user_id, $limit = 10) {
+    global $pdo;
+    $stmt = $pdo->prepare("SELECT * FROM login_logs WHERE user_id = ? ORDER BY login_time DESC LIMIT ?");
+    $stmt->execute([$user_id, $limit]);
+    return $stmt->fetchAll();
+}
+
+function getUserDocuments($user_id) {
+    global $pdo;
+    $stmt = $pdo->prepare("SELECT * FROM documents WHERE user_id = ?");
+    $stmt->execute([$user_id]);
+    return $stmt->fetchAll();
+}
+
+function getDocumentStatusClass($status) {
+    $classes = [
+        'pending' => 'badge-warning',
+        'approved' => 'badge-success',
+        'rejected' => 'badge-danger',
+        'processing' => 'badge-info',
+        'completed' => 'badge-success'
     ];
-    
-    return $badges[$status] ?? '<span class="badge badge-secondary">Unknown</span>';
+    return $classes[$status] ?? 'badge-secondary';
 }
 
-/**
- * Upload file
- */
-function uploadFile($file, $allowedTypes = null, $maxSize = null) {
-    if (!isset($file) || $file['error'] !== UPLOAD_ERR_OK) {
-        return ['success' => false, 'message' => 'File upload failed'];
-    }
-    
-    $allowedTypes = $allowedTypes ?: ALLOWED_FILE_TYPES;
-    $maxSize = $maxSize ?: MAX_FILE_SIZE;
-    
-    // Validate file size
-    if ($file['size'] > $maxSize) {
-        return ['success' => false, 'message' => 'File size too large'];
-    }
-    
-    // Validate file type
-    $fileExt = strtolower(pathinfo($file['name'], PATHINFO_EXTENSION));
-    if (!in_array($fileExt, $allowedTypes)) {
-        return ['success' => false, 'message' => 'File type not allowed'];
-    }
-    
-    // Generate unique filename
-    $filename = uniqid() . '_' . time() . '.' . $fileExt;
-    $filepath = UPLOAD_PATH . $filename;
-    
-    // Create upload directory if it doesn't exist
-    if (!is_dir(UPLOAD_PATH)) {
-        mkdir(UPLOAD_PATH, 0755, true);
-    }
-    
-    // Move uploaded file
-    if (move_uploaded_file($file['tmp_name'], $filepath)) {
-        return [
-            'success' => true,
-            'filename' => $filename,
-            'filepath' => $filepath,
-            'original_name' => $file['name']
-        ];
-    }
-    
-    return ['success' => false, 'message' => 'Failed to save file'];
+function redirect($url) {
+    header("Location: $url");
+    exit();
 }
 
-/**
- * Get service fee
- */
-function getServiceFee($serviceType) {
-    $fees = [
-        SERVICE_BIRTH_CERTIFICATE => 50,
-        SERVICE_DEATH_CERTIFICATE => 50,
-        SERVICE_MARRIAGE_CERTIFICATE => 100,
-        SERVICE_BUSINESS_LICENSE => 500,
-        SERVICE_PROPERTY_TAX => 0, // Variable amount
-        SERVICE_WATER_CONNECTION => 1000
+// ============================================================================
+// FILE UTILITY FUNCTIONS
+// ============================================================================
+
+function formatBytes($size, $precision = 2) {
+    if ($size == 0) return '0 B';
+    $base = log($size, 1024);
+    $suffixes = array('B', 'KB', 'MB', 'GB', 'TB');
+    return round(pow(1024, $base - floor($base)), $precision) . ' ' . $suffixes[floor($base)];
+}
+
+function getFileIcon($filename) {
+    $ext = strtolower(pathinfo($filename, PATHINFO_EXTENSION));
+    $icons = [
+        'pdf' => 'pdf',
+        'doc' => 'word',
+        'docx' => 'word',
+        'jpg' => 'image',
+        'jpeg' => 'image',
+        'png' => 'image'
     ];
-    
-    return $fees[$serviceType] ?? 0;
+    return $icons[$ext] ?? 'alt';
 }
 
-/**
- * Paginate results
- */
-function paginate($totalRecords, $recordsPerPage, $currentPage) {
-    $totalPages = ceil($totalRecords / $recordsPerPage);
-    $offset = ($currentPage - 1) * $recordsPerPage;
-    
-    return [
-        'total_pages' => $totalPages,
-        'current_page' => $currentPage,
-        'offset' => $offset,
-        'limit' => $recordsPerPage,
-        'has_previous' => $currentPage > 1,
-        'has_next' => $currentPage < $totalPages
-    ];
+function logActivity($user_id, $action, $description) {
+    // Placeholder: Save this activity into a log table if needed
+    // global $pdo;
+    // $stmt = $pdo->prepare("INSERT INTO activity_logs (user_id, action, description, created_at) VALUES (?, ?, ?, NOW())");
+    // $stmt->execute([$user_id, $action, $description]);
 }
-
-/**
- * Flash messages
- */
-function setFlashMessage($type, $message) {
-    $_SESSION['flash_messages'][] = [
-        'type' => $type,
-        'message' => $message
-    ];
-}
-
-function getFlashMessages() {
-    $messages = $_SESSION['flash_messages'] ?? [];
-    unset($_SESSION['flash_messages']);
-    return $messages;
-}
-
-/**
- * Generate OTP
- */
-function generateOTP($length = 6) {
-    return sprintf('%0' . $length . 'd', mt_rand(0, pow(10, $length) - 1));
-}
-
-/**
- * Send SMS (Mock implementation)
- */
-function sendSMS($phone, $message) {
-    // Mock implementation - integrate with SMS gateway
-    error_log("SMS to {$phone}: {$message}");
-    return true;
-}
-?>

@@ -2,6 +2,18 @@
 // includes/config.php
 session_start();
 
+// Define global config constant
+define('CITIZENLINK_CONFIG', true);
+
+// Load environment-specific configuration
+$environment = $_ENV['APP_ENV'] ?? 'development';
+
+if ($environment === 'production') {
+    require_once __DIR__ . '/config/production.php';
+} else {
+    require_once __DIR__ . '/config/development.php';
+}
+
 // Error reporting (disable in production)
 error_reporting(E_ALL);
 ini_set('display_errors', 1);
