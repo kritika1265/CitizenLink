@@ -339,7 +339,8 @@
     .benefits-list i {
         font-size: 1.25rem;
     }
-}: 768px) {
+}
+@media (max-width: 768px) {
     .auth-container {
         grid-template-columns: 1fr;
         gap: 2rem;
@@ -364,5 +365,3 @@
         gap: 1rem;
     }
 }
-
-@media (max-width
