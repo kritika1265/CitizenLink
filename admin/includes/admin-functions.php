@@ -5,6 +5,11 @@
  * Admin specific functions for CitizenLink
  */
 
+// Define ADMIN_URL if not already defined
+if (!defined('ADMIN_URL')) {
+    define('ADMIN_URL', '/admin'); // Change '/admin' to your actual admin URL if different
+}
+
 // Check if admin is logged in
 function isAdminLoggedIn() {
     return isset($_SESSION['admin_logged_in']) && $_SESSION['admin_logged_in'] === true;
